@@ -126,13 +126,13 @@ sequenceDiagram
 
 ### Repository AST Indexing
 ```bash
-python projects/autonomous_software_engineering_agent/main.py --repo .
+python main.py --repo .
 ```
 
 ### Performance Benchmark
 Run high-throughput AST transformation and rollback verification benchmarks:
 ```bash
-python projects/autonomous_software_engineering_agent/main.py --benchmark --iterations 100
+python main.py --benchmark --iterations 100
 ```
 
 ---
@@ -141,7 +141,7 @@ python projects/autonomous_software_engineering_agent/main.py --benchmark --iter
 
 Run pytest directly on the test suite:
 ```bash
-pytest projects/autonomous_software_engineering_agent/test_engine.py -v
+pytest test_engine.py -v
 ```
 
 The test suite covers:

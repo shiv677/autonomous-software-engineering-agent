@@ -281,3 +281,43 @@ def test_safe_div():
         with open(code_file, "r", encoding="utf-8") as f:
             verified_content = f.read()
         assert "if b == 0:" in verified_content
+
+
+def test_plan_issue_patch_respects_override_and_resolves_indexed_path():
+    """Verify target_symbol_override takes precedence over traceback and traceback file resolves to indexed path."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        sample_file = os.path.join(tmp_dir, "service.py")
+        with open(sample_file, "w", encoding="utf-8") as f:
+            f.write("def func_a():\n    return 1\n\ndef func_b():\n    return 2\n")
+        index = parse_repository_ast(tmp_dir)
+
+        tb_desc = 'Traceback: File "/nonexistent/remote/service.py", line 2, in func_a\nValueError'
+        plan_override = plan_issue_patch(tb_desc, index, target_symbol_override="func_b")
+        assert plan_override.planned_actions[0].target_symbol == "func_b"
+        assert plan_override.planned_actions[0].file_path == sample_file
+
+        plan_resolved = plan_issue_patch(tb_desc, index)
+        assert plan_resolved.planned_actions[0].target_symbol == "func_a"
+        assert plan_resolved.planned_actions[0].file_path == sample_file
+
+
+def test_patch_ast_rejects_non_definition_and_verify_handles_patch_error():
+    """Verify patch_ast_symbol rejects bare expressions and verify_and_resolve_patch catches patch errors."""
+    source = "def foo():\n    return 1\n"
+    with pytest.raises(ValueError, match="must be a function"):
+        patch_ast_symbol(source, "foo", "123")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        code_file = os.path.join(tmp_dir, "mod.py")
+        with open(code_file, "w", encoding="utf-8") as f:
+            f.write(source)
+        record = verify_and_resolve_patch(
+            file_path=code_file,
+            target_symbol="missing_symbol",
+            new_code="def bar(): pass",
+            test_target=code_file,
+            cwd=tmp_dir,
+        )
+        assert record.verified is False
+        assert record.rolled_back is True
+        assert record.test_result.passed is False

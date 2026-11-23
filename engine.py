@@ -136,12 +136,19 @@ def plan_issue_patch(
     target_file = ""
 
     # Check for traceback file/symbol pattern
-    traceback_match = re.search(r'File "([^"]+)", line \d+, in (\w+)', issue_description)
-    if traceback_match:
-        matched_file, matched_symbol = traceback_match.groups()
-        if matched_symbol in index.symbol_map:
-            target_symbol = matched_symbol
-            target_file = matched_file
+    if not target_symbol:
+        traceback_match = re.search(r'File "([^"]+)", line \d+, in (\w+)', issue_description)
+        if traceback_match:
+            matched_file, matched_symbol = traceback_match.groups()
+            if matched_symbol in index.symbol_map:
+                target_symbol = matched_symbol
+                syms = index.symbol_map[matched_symbol]
+                norm_matched = os.path.normpath(matched_file)
+                matching_sym = next(
+                    (s for s in syms if s.file_path == norm_matched or s.file_path.endswith(norm_matched)),
+                    syms[0],
+                )
+                target_file = matching_sym.file_path
 
     if not target_symbol:
         # Match symbol names directly in text
@@ -189,6 +196,8 @@ def patch_ast_symbol(source_code: str, target_symbol: str, new_code: str) -> str
     if not new_tree.body:
         raise ValueError("Replacement code cannot be empty")
     new_node = new_tree.body[0]
+    if not isinstance(new_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        raise ValueError("Replacement code must be a function, async function, or class definition")
 
     replaced = False
 
@@ -326,10 +335,27 @@ def verify_and_resolve_patch(
 ) -> ExecutionRecord:
     """Autonomous repair loop: applies AST patch, runs CI test suite, and automatically rolls back if tests fail."""
     start_time = time.perf_counter()
-    with open(file_path, "r", encoding="utf-8") as f:
-        original_code = f.read()
+    try:
+        _, original_backup = apply_patch_to_file(file_path, target_symbol, new_code)
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        return ExecutionRecord(
+            plan_id=f"EXEC-{int(time.time() * 1000) % 100000}",
+            patches_applied=[],
+            test_result=TestResult(
+                passed=False,
+                exit_code=1,
+                stdout="",
+                stderr=str(exc),
+                failure_category=type(exc).__name__,
+                diagnosed_file=file_path,
+                error_message=str(exc),
+            ),
+            verified=False,
+            rolled_back=True,
+            duration_ms=round(elapsed_ms, 2),
+        )
 
-    _, original_backup = apply_patch_to_file(file_path, target_symbol, new_code)
     test_result = run_automated_tests(test_target, cwd=cwd)
 
     if test_result.passed:
